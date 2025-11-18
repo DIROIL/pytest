@@ -11,33 +11,53 @@ jobs:
 
     services:
       keycloak:
-        image: quay.io/keycloak/keycloak:latest
+        image: quay.io/keycloak/keycloak:21.1.1
         ports:
           - 8080:8080
         env:
-          KEYCLOAK_USER: admin
-          KEYCLOAK_PASSWORD: admin_password
+          KEYCLOAK_ADMIN: admin
+          KEYCLOAK_ADMIN_PASSWORD: admin
         options: >-
-          --health-cmd "curl -f http://localhost:8080/auth/ || exit 1"
-          --health-interval 30s
-          --health-timeout 10s
-          --health-retries 5
+          --health-cmd "curl -f http://localhost:8080/ || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 60
+        
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.8'  # Adjust to your Python version
+          python-version: '3.8'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pytest requests allure-pytest
 
+      - name: Wait for Keycloak to be ready
+        run: |
+          echo "Waiting for Keycloak (up to ~5 minutes)..."
+          n=0
+          until curl -sSf http://localhost:8080/ >/dev/null; do
+            n=$((n+1))
+            if [ $n -ge 60 ]; then
+              echo "Keycloak did not become ready in time" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "Keycloak is ready"
+
       - name: Run tests
         run: |
-          pytest
-          allure serve reports/allure-results
+          pytest --alluredir=reports/allure-results
+
+      - name: Upload Allure results
+        uses: actions/upload-artifact@v3
+        with:
+          name: allure-results
+          path: reports/allure-results
