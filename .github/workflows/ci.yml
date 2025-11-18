@@ -8,25 +8,30 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-
-    services:
-      keycloak:
-        image: quay.io/keycloak/keycloak:21.1.1
-        ports:
-          - 8080:8080
-        env:
-          KEYCLOAK_ADMIN: admin
-          KEYCLOAK_ADMIN_PASSWORD: admin
-        options: >-
-          --health-cmd "curl -f http://localhost:8080/ || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 60
-        
-
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+
+      - name: Start Keycloak container
+        run: |
+          docker run -d --name keycloak -p 8080:8080 \
+            -e KEYCLOAK_ADMIN=admin \
+            -e KEYCLOAK_ADMIN_PASSWORD=admin \
+            quay.io/keycloak/keycloak:21.1.1 start-dev
+      - name: Wait for Keycloak to be ready
+        run: |
+          echo "Waiting for Keycloak to be ready (up to ~5 minutes)..."
+          n=0
+          until curl -sSf http://localhost:8080/ >/dev/null; do
+            n=$((n+1))
+            if [ $n -ge 60 ]; then
+              echo "Keycloak did not become ready in time" >&2
+              docker logs keycloak || true
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "Keycloak is ready"
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -38,26 +43,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest requests allure-pytest
 
-      - name: Wait for Keycloak to be ready
-        run: |
-          echo "Waiting for Keycloak (up to ~5 minutes)..."
-          n=0
-          until curl -sSf http://localhost:8080/ >/dev/null; do
-            n=$((n+1))
-            if [ $n -ge 60 ]; then
-              echo "Keycloak did not become ready in time" >&2
-              exit 1
-            fi
-            sleep 5
-          done
-          echo "Keycloak is ready"
-
       - name: Run tests
         run: |
           pytest --alluredir=reports/allure-results
 
       - name: Upload Allure results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: allure-results
           path: reports/allure-results
+
+      - name: Show Keycloak logs (on success)
+        if: success()
+        run: docker logs --tail 200 keycloak || true
+
+      - name: Cleanup Keycloak container
+        if: always()
+        run: |
+          docker stop keycloak || true
+          docker rm keycloak || true
