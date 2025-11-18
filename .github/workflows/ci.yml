@@ -11,7 +11,7 @@ jobs:
 
     services:
       keycloak:
-        image: jboss/keycloak:latest
+        image: quay.io/keycloak/keycloak:latest
         ports:
           - 8080:8080
         env:
